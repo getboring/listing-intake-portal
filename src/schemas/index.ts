@@ -224,7 +224,7 @@ export const zValidationIssue = z.object({
 });
 
 export const zCommandContext = z.object({
-  actorUserId: zUUID.optional(),
+  actorUserId: z.string().max(100).optional(),
   actorType: zActorType,
   role: zUserRole,
   timestamp: zTimestampISO,
@@ -248,3 +248,144 @@ export const zFrictionResult = z.object({
   issues: z.array(zValidationIssue),
   estimatedMinutesToResolve: z.number().int().nonnegative(),
 });
+
+// Section schemas ------------------------------------------------------------------
+
+export const zContactInfoSection = z.object({
+  firstName: z.string().min(1).max(100).optional(),
+  lastName: z.string().min(1).max(100).optional(),
+  email: z.string().email().max(254).optional(),
+  phone: z.string().max(50).optional(),
+  preferredContactMethod: z.enum(["sms", "email", "call"]).optional(),
+  alternatePhone: z.string().max(50).optional(),
+});
+
+export const zOwnershipDisclosuresSection = z.object({
+  isPrimaryResidence: z.boolean().optional(),
+  hasHoa: z.boolean().optional(),
+  hoaName: z.string().max(200).optional(),
+  knownDefects: z.string().max(2000).optional(),
+  recentRenovations: z.string().max(2000).optional(),
+  hasLeadPaint: z.boolean().optional(),
+  floodZone: z.string().max(100).optional(),
+});
+
+export const zMediaConditionSection = z.object({
+  hasProfessionalPhotos: z.boolean().optional(),
+  photoCount: z.number().int().min(0).max(500).optional(),
+  virtualTourUrl: z.string().url().max(500).optional(),
+  needsStaging: z.boolean().optional(),
+  stagingNotes: z.string().max(1000).optional(),
+});
+
+export const zPricingGoalsSection = z.object({
+  expectedPrice: z.number().int().nonnegative().optional(),
+  minimumPrice: z.number().int().nonnegative().optional(),
+  appraisalDisputes: z.string().max(1000).optional(),
+  pricingStrategy: z.enum(["aggressive", "market", "conservative"]).optional(),
+  urgency: z.enum(["low", "medium", "high"]).optional(),
+});
+
+export const zReviewSubmitSection = z.object({
+  termsAccepted: z.boolean().optional(),
+  accuracyConfirmed: z.boolean().optional(),
+  signature: z.string().max(500).optional(),
+  notes: z.string().max(2000).optional(),
+});
+
+export const zCompleteSection = z.object({
+  completed: z.boolean().optional(),
+  notes: z.string().max(1000).optional(),
+});
+
+// DO Command schemas ---------------------------------------------------------------
+
+export const zCreateIntakeCommand = z.object({
+  type: z.literal("CreateIntake"),
+  propertyId: zUUID,
+  clientId: zUUID,
+  orgId: zUUID,
+  assignedAgentId: zUUID.optional(),
+  source: z.string().max(200).optional(),
+  idempotencyKey: z.string().max(200).optional(),
+  _meta: zCommandContext,
+});
+
+export const zInviteSellerCommand = z.object({
+  type: z.literal("InviteSeller"),
+  intakeId: z.string().min(1).max(100),
+  sellerEmail: z.string().email().max(254),
+  _meta: zCommandContext,
+});
+
+export const zUpdateSectionCommand = z.object({
+  type: z.literal("UpdateSection"),
+  intakeId: z.string().min(1).max(100),
+  sectionKey: z.string().regex(/^[a-z_]+$/).max(50),
+  payload: z.record(z.unknown()),
+  _meta: zCommandContext,
+});
+
+export const zSubmitIntakeCommand = z.object({
+  type: z.literal("SubmitIntake"),
+  intakeId: z.string().min(1).max(100),
+  _meta: zCommandContext,
+});
+
+export const zStartReviewCommand = z.object({
+  type: z.literal("StartReview"),
+  intakeId: z.string().min(1).max(100),
+  _meta: zCommandContext,
+});
+
+export const zApproveIntakeCommand = z.object({
+  type: z.literal("ApproveIntake"),
+  intakeId: z.string().min(1).max(100),
+  notes: z.string().max(2000).optional(),
+  _meta: zCommandContext,
+});
+
+export const zBlockIntakeCommand = z.object({
+  type: z.literal("BlockIntake"),
+  intakeId: z.string().min(1).max(100),
+  reason: z.string().min(1).max(2000),
+  _meta: zCommandContext,
+});
+
+export const zRequestRevisionCommand = z.object({
+  type: z.literal("RequestRevision"),
+  intakeId: z.string().min(1).max(100),
+  notes: z.string().min(1).max(2000),
+  _meta: zCommandContext,
+});
+
+export const zUploadDocumentCommand = z.object({
+  type: z.literal("UploadDocument"),
+  intakeId: z.string().min(1).max(100),
+  documentType: zDocumentType,
+  fileName: z.string().min(1).max(255),
+  storageKey: z.string().min(1).max(500),
+  fileSizeBytes: z.number().int().min(0).max(100_000_000),
+  checksumSha256: z.string().max(128).optional(),
+  _meta: zCommandContext,
+});
+
+export const zAssignCoordinatorCommand = z.object({
+  type: z.literal("AssignCoordinator"),
+  intakeId: z.string().min(1).max(100),
+  coordinatorId: z.string().min(1).max(100),
+  _meta: zCommandContext,
+});
+
+export const zIntakeCommand = z.discriminatedUnion("type", [
+  zCreateIntakeCommand,
+  zInviteSellerCommand,
+  zUpdateSectionCommand,
+  zSubmitIntakeCommand,
+  zStartReviewCommand,
+  zApproveIntakeCommand,
+  zBlockIntakeCommand,
+  zRequestRevisionCommand,
+  zUploadDocumentCommand,
+  zAssignCoordinatorCommand,
+]);

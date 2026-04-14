@@ -26,6 +26,13 @@ import { z } from "zod";
 import {
   zPropertyDetailsSection,
   zAccessShowingsSection,
+  zContactInfoSection,
+  zOwnershipDisclosuresSection,
+  zMediaConditionSection,
+  zPricingGoalsSection,
+  zReviewSubmitSection,
+  zCompleteSection,
+  zIntakeCommand,
 } from "~/schemas/index.js";
 import type { DomainEvent } from "~/events/types.js";
 
@@ -118,38 +125,44 @@ export class ListingIntakeDO implements DurableObject {
     return event;
   }
 
+  private isTerminalStatus(): boolean {
+    return this.status === "approved" || this.status === "archived" || this.status === "canceled";
+  }
+
   async createIntake(
     cmd: CreateIntakeCommand
   ): Promise<CommandResult<{ intakeId: string }>> {
-    await this.load();
-    if (this.intakeId) {
-      return { success: false, events: [], errors: ["Intake already exists"] };
-    }
-    this.intakeId = crypto.randomUUID();
-    this.orgId = cmd.orgId;
-    this.status = "draft";
-    this.currentStage = "contact_info";
-    await this.persist();
-    const event = this.makeEvent({
-      eventType: "IntakeCreated",
-      aggregateType: "listing_intake",
-      aggregateId: this.intakeId,
-      orgId: this.orgId,
-      actorType: cmd._meta.actorType,
-      actorUserId: cmd._meta.actorUserId,
-      payload: {
-        propertyId: cmd.propertyId,
-        clientId: cmd.clientId,
-        assignedAgentId: cmd.assignedAgentId,
-        source: cmd.source,
-      },
-      timestamp: new Date().toISOString(),
+    return this.ctx.blockConcurrencyWhile(async () => {
+      await this.load();
+      if (this.intakeId) {
+        return { success: false, events: [], errors: ["Intake already exists"] };
+      }
+      this.intakeId = crypto.randomUUID();
+      this.orgId = cmd.orgId;
+      this.status = "draft";
+      this.currentStage = "contact_info";
+      await this.persist();
+      const event = this.makeEvent({
+        eventType: "IntakeCreated",
+        aggregateType: "listing_intake",
+        aggregateId: this.intakeId,
+        orgId: this.orgId,
+        actorType: cmd._meta.actorType,
+        actorUserId: cmd._meta.actorUserId,
+        payload: {
+          propertyId: cmd.propertyId,
+          clientId: cmd.clientId,
+          assignedAgentId: cmd.assignedAgentId,
+          source: cmd.source,
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        success: true,
+        data: { intakeId: this.intakeId },
+        events: [event],
+      };
     });
-    return {
-      success: true,
-      data: { intakeId: this.intakeId },
-      events: [event],
-    };
   }
 
   async inviteSeller(cmd: InviteSellerCommand): Promise<CommandResult> {
@@ -173,6 +186,13 @@ export class ListingIntakeDO implements DurableObject {
 
   async updateSection(cmd: UpdateSectionCommand): Promise<CommandResult> {
     await this.load();
+    if (this.isTerminalStatus()) {
+      return {
+        success: false,
+        events: [],
+        errors: ["Cannot update section for a closed intake"],
+      };
+    }
     const validSections = new Set<string>([
       "contact_info",
       "property_details",
@@ -186,17 +206,28 @@ export class ListingIntakeDO implements DurableObject {
       return {
         success: false,
         events: [],
-        errors: [`Unknown section key: ${cmd.sectionKey}`],
+        errors: ["Unknown section key"],
       };
     }
 
-    let isValid = true;
     let schema: z.ZodType<Record<string, unknown>> | undefined;
     if (cmd.sectionKey === "property_details") {
       schema = zPropertyDetailsSection;
     } else if (cmd.sectionKey === "access_showings") {
       schema = zAccessShowingsSection;
+    } else if (cmd.sectionKey === "contact_info") {
+      schema = zContactInfoSection;
+    } else if (cmd.sectionKey === "ownership_disclosures") {
+      schema = zOwnershipDisclosuresSection;
+    } else if (cmd.sectionKey === "media_condition") {
+      schema = zMediaConditionSection;
+    } else if (cmd.sectionKey === "pricing_goals") {
+      schema = zPricingGoalsSection;
+    } else if (cmd.sectionKey === "review_submit") {
+      schema = zReviewSubmitSection;
     }
+
+    let isValid = true;
     if (schema) {
       const result = schema.safeParse(cmd.payload);
       isValid = result.success;
@@ -394,6 +425,13 @@ export class ListingIntakeDO implements DurableObject {
     cmd: UploadDocumentCommand
   ): Promise<CommandResult<{ documentId: string }>> {
     await this.load();
+    if (this.isTerminalStatus()) {
+      return {
+        success: false,
+        events: [],
+        errors: ["Cannot upload documents to a closed intake"],
+      };
+    }
     const documentId = crypto.randomUUID();
     this.documents.push(documentId);
     await this.persist();
@@ -447,103 +485,66 @@ export class ListingIntakeDO implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/command") {
-      const raw = await request.json();
-      if (!raw || typeof raw !== "object" || !("type" in raw)) {
+      let raw: unknown;
+      try {
+        raw = await request.json();
+      } catch {
         return Response.json(
-          { success: false, events: [], errors: ["Invalid command body"] },
+          { success: false, events: [], errors: ["Invalid JSON body"] },
           { status: 400 }
         );
       }
-      const body = raw as Record<string, unknown>;
+      const parsed = zIntakeCommand.safeParse(raw);
+      if (!parsed.success) {
+        return Response.json(
+          { success: false, events: [], errors: parsed.error.issues.map((i) => i.message) },
+          { status: 400 }
+        );
+      }
+
+      const cmd = parsed.data;
       let result: CommandResult;
-      switch (body.type) {
-        case "CreateIntake":
-          if (
-            typeof body.orgId !== "string" ||
-            typeof body.propertyId !== "string" ||
-            typeof body.clientId !== "string"
-          ) {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing required fields for CreateIntake"] },
-              { status: 400 }
-            );
-          }
-          result = await this.createIntake(body as unknown as CreateIntakeCommand);
-          break;
-        case "InviteSeller":
-          if (typeof body.sellerEmail !== "string") {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing sellerEmail"] },
-              { status: 400 }
-            );
-          }
-          result = await this.inviteSeller(body as unknown as InviteSellerCommand);
-          break;
-        case "UpdateSection":
-          if (
-            typeof body.sectionKey !== "string" ||
-            !body.payload ||
-            typeof body.payload !== "object"
-          ) {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing sectionKey or payload"] },
-              { status: 400 }
-            );
-          }
-          result = await this.updateSection(body as unknown as UpdateSectionCommand);
-          break;
-        case "SubmitIntake":
-          result = await this.submitIntake(body as unknown as SubmitIntakeCommand);
-          break;
-        case "StartReview":
-          result = await this.startReview(body as unknown as StartReviewCommand);
-          break;
-        case "ApproveIntake":
-          result = await this.approveIntake(body as unknown as ApproveIntakeCommand);
-          break;
-        case "BlockIntake":
-          if (typeof body.reason !== "string") {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing reason"] },
-              { status: 400 }
-            );
-          }
-          result = await this.blockIntake(body as unknown as BlockIntakeCommand);
-          break;
-        case "RequestRevision":
-          if (typeof body.notes !== "string") {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing notes"] },
-              { status: 400 }
-            );
-          }
-          result = await this.requestRevision(body as unknown as RequestRevisionCommand);
-          break;
-        case "UploadDocument":
-          if (
-            typeof body.documentType !== "string" ||
-            typeof body.fileName !== "string" ||
-            typeof body.storageKey !== "string" ||
-            typeof body.fileSizeBytes !== "number"
-          ) {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing document fields"] },
-              { status: 400 }
-            );
-          }
-          result = await this.uploadDocument(body as unknown as UploadDocumentCommand);
-          break;
-        case "AssignCoordinator":
-          if (typeof body.coordinatorId !== "string") {
-            return Response.json(
-              { success: false, events: [], errors: ["Missing coordinatorId"] },
-              { status: 400 }
-            );
-          }
-          result = await this.assignCoordinator(body as unknown as AssignCoordinatorCommand);
-          break;
-        default:
-          result = { success: false, events: [], errors: ["Unknown command type"] };
+      try {
+        switch (cmd.type) {
+          case "CreateIntake":
+            result = await this.createIntake(cmd);
+            break;
+          case "InviteSeller":
+            result = await this.inviteSeller(cmd);
+            break;
+          case "UpdateSection":
+            result = await this.updateSection(cmd);
+            break;
+          case "SubmitIntake":
+            result = await this.submitIntake(cmd);
+            break;
+          case "StartReview":
+            result = await this.startReview(cmd);
+            break;
+          case "ApproveIntake":
+            result = await this.approveIntake(cmd);
+            break;
+          case "BlockIntake":
+            result = await this.blockIntake(cmd);
+            break;
+          case "RequestRevision":
+            result = await this.requestRevision(cmd);
+            break;
+          case "UploadDocument":
+            result = await this.uploadDocument(cmd);
+            break;
+          case "AssignCoordinator":
+            result = await this.assignCoordinator(cmd);
+            break;
+          default:
+            result = { success: false, events: [], errors: ["Unknown command type"] };
+        }
+      } catch (err) {
+        console.error("DO command error", err);
+        return Response.json(
+          { success: false, events: [], errors: ["Internal error processing command"] },
+          { status: 502 }
+        );
       }
       return Response.json(result);
     }

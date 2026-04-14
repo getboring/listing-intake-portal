@@ -40,7 +40,27 @@ wrangler.jsonc
    ```bash
    npx wrangler d1 migrations apply listing-intake-db --local
    ```
-3. (Optional) Set `WEBHOOK_SECRET` in Worker secrets for webhook HMAC verification.
+3. Set secrets (never commit these):
+   ```bash
+   npx wrangler secret put API_TOKEN
+   npx wrangler secret put WEBHOOK_SECRET
+   npx wrangler secret put MLS_CONNECTIONS_JSON
+   ```
+   - `API_TOKEN` — Bearer token for API authentication (omit in local dev to skip auth)
+   - `WEBHOOK_SECRET` — HMAC-SHA256 key for webhook signature verification
+   - `MLS_CONNECTIONS_JSON` — JSON map of `orgId -> MLS connection config`:
+     ```json
+     {
+       "org-id-uuid": {
+         "baseUrl": "https://api.mlsprovider.com/",
+         "resourceName": "Property",
+         "clientId": "your-client-id",
+         "clientSecret": "your-client-secret",
+         "tokenEndpoint": "https://auth.mlsprovider.com/token",
+         "scope": "api"
+       }
+     }
+     ```
 
 ## Running Tests
 
@@ -60,6 +80,14 @@ npm run deploy
 npm run build:app
 ```
 Deploy `dist-app/` to Cloudflare Pages or serve via the Worker.
+
+## Security & Operations
+
+- **Auth**: Bearer-token middleware when `API_TOKEN` is configured; seller routes verify intake ownership; admin routes require `agent`/`coordinator`/`admin` role.
+- **Rate limiting**: Token-bucket per IP (10 RPS, burst 20).
+- **Upload safety**: MIME-type whitelist and R2 existence check before document registration.
+- **Webhook verification**: HMAC-SHA256 signature check on `/webhooks/document-extracted` and `/webhooks/email-events` when `WEBHOOK_SECRET` is set.
+- **Idempotency**: Pass `X-Idempotency-Key` on `POST /intakes` and `POST /admin/intakes/:id/mls/push`.
 
 ## RESO / MLS Compliance
 

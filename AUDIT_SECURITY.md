@@ -5,6 +5,24 @@
 
 ---
 
+## Remediation Summary (2026-04-13)
+All critical and high findings have been addressed. Key changes:
+- **Authentication/Authorization**: Added Hono auth middleware (`requireAuth`) that validates a Bearer `API_TOKEN` when configured. Seller routes verify intake ownership against D1. Admin routes enforce `agent`/`coordinator`/`admin` roles.
+- **Input Validation**: Strict Zod schemas added for all 8 section payloads. All DO commands are validated with `zIntakeCommand` — no `as` casts remain.
+- **MLS Credentials**: Removed `auth` from `/mls/push` request body. Credentials are now looked up securely from `MLS_CONNECTIONS_JSON` by `orgId`.
+- **Webhooks**: Both `/webhooks/document-extracted` and `/webhooks/email-events` verify `X-Webhook-Signature` HMAC-SHA256 when `WEBHOOK_SECRET` is set.
+- **Rate Limiting**: Token-bucket middleware added (10 RPS / burst 20), keyed by `cf-connecting-ip`.
+- **Upload Security**: MIME-type whitelist, 100 MB file size cap, and R2 head-object verification before DO registration.
+- **DO Safety**: `createIntake` wrapped in `blockConcurrencyWhile`. Terminal-status guards prevent `UpdateSection` and `UploadDocument` on closed intakes.
+- **MLS Connector**: HTTPS enforced on `baseUrl` and `tokenEndpoint`. `mlsListingKey` validated with regex and URL-encoded. 409/412 handling added.
+- **Error Handling**: API routes wrap DO and MLS calls in `try/catch` and return sanitized errors (502/503) without leaking internals.
+- **Pagination**: `/admin/intakes` supports `limit` + `cursor` (offset-based) pagination.
+- **Frontend Bounds**: `window.prompt` inputs trimmed and capped at 2000 characters.
+
+---
+
+---
+
 ## Executive Summary
 The application has **zero authentication/authorization enforcement** across all API routes. Combined with missing input validation on several endpoints, broken RBAC propagation to the Durable Object state machine, and sensitive MLS credentials being accepted via request bodies, the system is currently unsuitable for production use without significant hardening.
 

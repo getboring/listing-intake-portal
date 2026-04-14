@@ -1,177 +1,520 @@
 import { useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  XCircle,
+  Play,
+  RotateCcw,
+  UserPlus,
+  FileJson,
+  UploadCloud,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  AlertCircle,
+  Home,
+} from "lucide-react";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { Badge } from "./ui/badge";
+import { Progress } from "./ui/progress";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Skeleton } from "./ui/skeleton";
+import { Separator } from "./ui/separator";
+import { Label } from "./ui/label";
+import { Dialog, DialogActions } from "./ui/dialog";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
-type IntakeSummary = {
+interface Intake {
   id: string;
-  intakeNumber?: string;
+  sellerEmail: string;
   status: string;
   currentStage: string;
   completionPercent: number;
   readinessScore: number;
-  property?: { street1?: string; city?: string; state?: string };
-  client?: { displayName?: string };
-  assignedAgent?: { firstName?: string; lastName?: string };
-  assignedCoordinatorId?: string;
-};
+  createdAt: string;
+}
+
+interface ListResponse {
+  data: Intake[];
+  nextCursor?: string;
+}
 
 export function AdminDashboard() {
-  const [intakes, setIntakes] = useState<IntakeSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [intakes, setIntakes] = useState<Intake[]>([]);
+  const [query, setQuery] = useState("");
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [modal, setModal] = useState<{
+    type: "approve" | "block" | "revision" | "assign" | null;
+    intakeId: string;
+    value: string;
+  }>({ type: null, intakeId: "", value: "" });
 
-  async function loadIntakes() {
+  async function loadList(after?: string | null) {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`${API_BASE}/admin/intakes`);
-      const data = (await res.json()) as IntakeSummary[];
-      setIntakes(Array.isArray(data) ? data : []);
-      setError("");
+      const qs = new URLSearchParams();
+      qs.set("limit", "20");
+      if (after) qs.set("after", after);
+      const res = await fetch(`${API_BASE}/admin/intakes?${qs.toString()}`);
+      const json = (await res.json()) as ListResponse;
+      setIntakes(json.data || []);
+      setNextCursor(json.nextCursor || null);
     } catch (e) {
-      setError(String(e));
+      setError("Failed to load intakes.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadIntakes();
+    loadList();
   }, []);
 
-  async function apiAction(id: string, path: string, body?: unknown, method = "POST") {
-    setActionLoading((prev) => ({ ...prev, [id]: true }));
+  const filtered = intakes.filter(
+    (i) =>
+      i.sellerEmail?.toLowerCase().includes(query.toLowerCase()) ||
+      i.status?.toLowerCase().includes(query.toLowerCase()) ||
+      i.id?.toLowerCase().includes(query.toLowerCase())
+  );
+
+  async function apiAction(id: string, actionPath: string, body?: Record<string, unknown>) {
+    setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/admin/intakes/${id}${path}`, {
-        method,
+      const res = await fetch(`${API_BASE}/admin/intakes/${id}${actionPath}`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
+        body: body ? JSON.stringify(body) : undefined,
       });
-      const data = (await res.json()) as { success?: boolean; errors?: string[]; mlsListingKey?: string };
-      alert(data.success ? (data.mlsListingKey ? `Success: MLS Key ${data.mlsListingKey}` : "Success") : `Error: ${data.errors?.join(", ") || "Unknown"}`);
-      await loadIntakes();
+      const json = (await res.json()) as { success?: boolean; errors?: string[] };
+      if (!json.success) {
+        setError(json.errors?.join(", ") || "Action failed");
+      }
+      await loadList(cursor);
     } catch (e) {
-      alert(`Error: ${String(e)}`);
+      setError("Action failed");
     } finally {
-      setActionLoading((prev) => ({ ...prev, [id]: false }));
+      setLoading(false);
     }
   }
 
-  async function startReview(id: string) {
-    await apiAction(id, "/start-review", {});
+  function openModal(type: "approve" | "block" | "revision" | "assign", id: string) {
+    setModal({ type, intakeId: id, value: "" });
   }
 
-  async function approve(id: string) {
-    const notes = window.prompt("Approval notes (optional):") || undefined;
-    await apiAction(id, "/approve", notes ? { notes } : {});
+  function closeModal() {
+    setModal({ type: null, intakeId: "", value: "" });
   }
 
-  async function block(id: string) {
-    const reason = window.prompt("Reason for blocking?");
-    if (!reason) return;
-    await apiAction(id, "/block", { reason });
-  }
-
-  async function requestRevision(id: string) {
-    const notes = window.prompt("Revision notes:");
-    if (!notes) return;
-    await apiAction(id, "/request-revision", { notes });
-  }
-
-  async function assignCoordinator(id: string) {
-    const coordinatorId = window.prompt("Coordinator ID:");
-    if (!coordinatorId) return;
-    await apiAction(id, "/assign", { coordinatorId });
-  }
-
-  async function exportRESO(id: string) {
-    try {
-      const res = await fetch(`${API_BASE}/admin/intakes/${id}/export/reso`);
-      const data = await res.json();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `intake-${id}-reso.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert(`Export failed: ${String(e)}`);
+  function modalTitle() {
+    switch (modal.type) {
+      case "approve":
+        return "Approve Intake";
+      case "block":
+        return "Block Intake";
+      case "revision":
+        return "Request Revision";
+      case "assign":
+        return "Assign Coordinator";
+      default:
+        return "";
     }
   }
 
-  async function pushMLS(id: string) {
-    const baseUrl = window.prompt("MLS Base URL:");
-    if (!baseUrl) return;
-    const clientId = window.prompt("Client ID:");
-    if (!clientId) return;
-    const clientSecret = window.prompt("Client Secret:");
-    if (!clientSecret) return;
-    const tokenEndpoint = window.prompt("Token Endpoint:") || "";
-    await apiAction(id, "/mls/push", {
-      baseUrl,
-      resourceName: "Property",
-      auth: { clientId, clientSecret, tokenEndpoint },
-    });
+  function modalDescription() {
+    switch (modal.type) {
+      case "approve":
+        return "Approve this intake to move it forward.";
+      case "block":
+        return "Provide a reason for blocking this intake.";
+      case "revision":
+        return "Describe what the seller needs to correct.";
+      case "assign":
+        return "Enter the coordinator ID to assign.";
+      default:
+        return "";
+    }
   }
 
-  if (loading) return <p>Loading...</p>;
-  if (error) return <p style={{ color: "#c00" }}>{error}</p>;
+  const total = intakes.length;
+  const submitted = intakes.filter((i) => i.status === "submitted").length;
+  const underReview = intakes.filter((i) => i.status === "under_review").length;
+  const approved = intakes.filter((i) => i.status === "approved").length;
 
   return (
-    <div style={{ maxWidth: 1400, margin: "2rem auto", fontFamily: "system-ui, sans-serif", padding: "0 1rem" }}>
-      <h1>Admin Dashboard</h1>
-      <button type="button" onClick={loadIntakes} style={{ marginBottom: 16 }}>Refresh</button>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
-          <thead>
-            <tr style={{ textAlign: "left", borderBottom: "2px solid #ccc" }}>
-              <th>ID</th>
-              <th>Address</th>
-              <th>Client</th>
-              <th>Status</th>
-              <th>Stage</th>
-              <th>Completion</th>
-              <th>Readiness</th>
-              <th>Agent</th>
-              <th>Coordinator</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {intakes.map((i) => (
-              <tr key={i.id} style={{ borderBottom: "1px solid #eee" }}>
-                <td>{i.intakeNumber || i.id.slice(0, 8)}</td>
-                <td>{i.property ? `${i.property.street1 || ""}, ${i.property.city || ""}, ${i.property.state || ""}` : "—"}</td>
-                <td>{i.client?.displayName || "—"}</td>
-                <td>{i.status}</td>
-                <td>{i.currentStage}</td>
-                <td>{i.completionPercent}%</td>
-                <td>{i.readinessScore}</td>
-                <td>{i.assignedAgent ? `${i.assignedAgent.firstName || ""} ${i.assignedAgent.lastName || ""}` : "—"}</td>
-                <td>{i.assignedCoordinatorId ? i.assignedCoordinatorId.slice(0, 8) : "—"}</td>
-                <td>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {i.status === "submitted" && (
-                      <button type="button" disabled={actionLoading[i.id]} onClick={() => startReview(i.id)}>Start Review</button>
+    <div className="min-h-screen bg-gradient-to-br from-sky-50 to-indigo-50 p-4 pb-24 sm:p-6">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Admin Dashboard</h1>
+            <p className="text-sm text-muted-foreground">Manage listing intakes and review submissions.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => loadList(cursor)} disabled={loading}>
+              <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Total</CardDescription>
+              <CardTitle className="text-3xl">{total}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Progress value={total ? 100 : 0} className="h-2" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Submitted</CardDescription>
+              <CardTitle className="text-3xl">{submitted}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Progress value={total ? (submitted / total) * 100 : 0} className="h-2" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Under Review</CardDescription>
+              <CardTitle className="text-3xl">{underReview}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Progress value={total ? (underReview / total) * 100 : 0} className="h-2" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Approved</CardDescription>
+              <CardTitle className="text-3xl">{approved}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Progress value={total ? (approved / total) * 100 : 0} className="h-2" />
+            </CardContent>
+          </Card>
+        </div>
+
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Card className="border-0 shadow-xl shadow-black/5">
+          <CardHeader>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle>Intakes</CardTitle>
+                <CardDescription>Review and manage seller submissions.</CardDescription>
+              </div>
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by email, status, or ID..."
+                  className="pl-9"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loading && intakes.length === 0 ? (
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">ID</th>
+                      <th className="px-4 py-3 text-left font-medium">Email</th>
+                      <th className="px-4 py-3 text-left font-medium">Status</th>
+                      <th className="px-4 py-3 text-left font-medium">Progress</th>
+                      <th className="px-4 py-3 text-left font-medium">Readiness</th>
+                      <th className="px-4 py-3 text-left font-medium">Created</th>
+                      <th className="px-4 py-3 text-right font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filtered.map((i) => (
+                      <tr key={i.id} className="bg-white hover:bg-muted/30">
+                        <td className="px-4 py-3 font-mono text-xs">{i.id.slice(0, 8)}</td>
+                        <td className="px-4 py-3">{i.sellerEmail}</td>
+                        <td className="px-4 py-3">
+                          <Badge
+                            variant={
+                              i.status === "approved"
+                                ? "default"
+                                : i.status === "submitted"
+                                ? "secondary"
+                                : i.status === "under_review"
+                                ? "outline"
+                                : "destructive"
+                            }
+                          >
+                            {i.status}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Progress value={i.completionPercent} className="h-2 w-20" />
+                            <span className="text-xs text-muted-foreground">{i.completionPercent}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Progress value={i.readinessScore} className="h-2 w-20" />
+                            <span className="text-xs text-muted-foreground">{i.readinessScore}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{new Date(i.createdAt).toLocaleDateString()}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            {i.status === "submitted" && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Start Review"
+                                  onClick={() => apiAction(i.id, "/start-review", {})}
+                                >
+                                  <Play className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Request Revision"
+                                  onClick={() => openModal("revision", i.id)}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            {i.status === "under_review" && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Approve"
+                                  onClick={() => openModal("approve", i.id)}
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Block"
+                                  onClick={() => openModal("block", i.id)}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Request Revision"
+                                  onClick={() => openModal("revision", i.id)}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Assign Coordinator"
+                              onClick={() => openModal("assign", i.id)}
+                            >
+                              <UserPlus className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Export RESO"
+                              onClick={() => apiAction(i.id, "/export/reso", {})}
+                            >
+                              <FileJson className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Push to MLS"
+                              onClick={() => apiAction(i.id, "/mls/push", {})}
+                            >
+                              <UploadCloud className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                          No intakes found.
+                        </td>
+                      </tr>
                     )}
-                    {(i.status === "under_review" || i.status === "blocked") && (
-                      <>
-                        <button type="button" disabled={actionLoading[i.id]} onClick={() => approve(i.id)}>Approve</button>
-                        <button type="button" disabled={actionLoading[i.id]} onClick={() => block(i.id)}>Block</button>
-                        <button type="button" disabled={actionLoading[i.id]} onClick={() => requestRevision(i.id)}>Request Revision</button>
-                      </>
-                    )}
-                    <button type="button" disabled={actionLoading[i.id]} onClick={() => assignCoordinator(i.id)}>Assign</button>
-                    <button type="button" disabled={actionLoading[i.id]} onClick={() => exportRESO(i.id)}>Export RESO</button>
-                    <button type="button" disabled={actionLoading[i.id]} onClick={() => pushMLS(i.id)}>Push MLS</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center justify-between">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCursor(null);
+                  loadList(null);
+                }}
+                disabled={!cursor || loading}
+              >
+                <ChevronLeft className="mr-2 h-4 w-4" />
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground">{filtered.length} shown</span>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (nextCursor) {
+                    setCursor(nextCursor);
+                    loadList(nextCursor);
+                  }
+                }}
+                disabled={!nextCursor || loading}
+              >
+                Next
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          MLS credentials are configured securely via environment variables.
+        </p>
       </div>
+
+      <Dialog open={modal.type !== null} onClose={closeModal} title={modalTitle()} description={modalDescription()}>
+        <div className="space-y-3">
+          {modal.type === "approve" && (
+            <>
+              <Label>Notes (optional)</Label>
+              <textarea
+                className="flex min-h-[5rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={modal.value}
+                onChange={(e) => setModal((m) => ({ ...m, value: e.target.value }))}
+                placeholder="Any notes for the seller..."
+              />
+              <DialogActions>
+                <Button variant="outline" onClick={closeModal}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    apiAction(modal.intakeId, "/approve", modal.value.trim() ? { notes: modal.value.trim() } : {});
+                    closeModal();
+                  }}
+                >
+                  Approve
+                </Button>
+              </DialogActions>
+            </>
+          )}
+          {modal.type === "block" && (
+            <>
+              <Label>Reason</Label>
+              <textarea
+                className="flex min-h-[5rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={modal.value}
+                onChange={(e) => setModal((m) => ({ ...m, value: e.target.value }))}
+                placeholder="Why is this intake being blocked?"
+              />
+              <DialogActions>
+                <Button variant="outline" onClick={closeModal}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={!modal.value.trim()}
+                  onClick={() => {
+                    apiAction(modal.intakeId, "/block", { reason: modal.value.trim() });
+                    closeModal();
+                  }}
+                >
+                  Block
+                </Button>
+              </DialogActions>
+            </>
+          )}
+          {modal.type === "revision" && (
+            <>
+              <Label>Revision Notes</Label>
+              <textarea
+                className="flex min-h-[5rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={modal.value}
+                onChange={(e) => setModal((m) => ({ ...m, value: e.target.value }))}
+                placeholder="What needs to be corrected or added?"
+              />
+              <DialogActions>
+                <Button variant="outline" onClick={closeModal}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={!modal.value.trim()}
+                  onClick={() => {
+                    apiAction(modal.intakeId, "/request-revision", { notes: modal.value.trim() });
+                    closeModal();
+                  }}
+                >
+                  Request Revision
+                </Button>
+              </DialogActions>
+            </>
+          )}
+          {modal.type === "assign" && (
+            <>
+              <Label>Coordinator ID</Label>
+              <Input
+                value={modal.value}
+                onChange={(e) => setModal((m) => ({ ...m, value: e.target.value }))}
+                placeholder="coordinator-123"
+              />
+              <DialogActions>
+                <Button variant="outline" onClick={closeModal}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={!modal.value.trim()}
+                  onClick={() => {
+                    apiAction(modal.intakeId, "/assign-coordinator", { coordinatorId: modal.value.trim() });
+                    closeModal();
+                  }}
+                >
+                  Assign
+                </Button>
+              </DialogActions>
+            </>
+          )}
+        </div>
+      </Dialog>
     </div>
   );
+}
+
+function cn(...inputs: (string | undefined | null | false)[]) {
+  return inputs.filter(Boolean).join(" ");
 }

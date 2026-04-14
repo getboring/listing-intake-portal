@@ -6,6 +6,25 @@
 
 ---
 
+## Remediation Summary (2026-04-13)
+All 24 issues have been remediated. Highlights:
+- **Approval/Blocking fixed**: `_meta.role` is now propagated from API routes to the DO via `buildMeta()`, enabling `canTransitionStatus` reviewer checks.
+- **Workflow deadlock resolved**: `POST /admin/intakes/:id/start-review` route added, transitioning `submitted -> under_review`.
+- **Request Revision**: `POST /admin/intakes/:id/request-revision` now proxies to the DO and transitions `under_review -> in_progress`.
+- **Empty checklist auto-approve fixed**: `areRequiredTasksComplete()` returns `false` when the checklist Map is empty.
+- **DO persistence made atomic**: `persist()` and `load()` use a single `"state"` snapshot key.
+- **DO input validation hardened**: `zIntakeCommand` validates all inbound DO commands. Empty `coordinatorId` / `reason` rejected. `fileSizeBytes` capped at 100 MB. `sellerEmail` capped at 254 chars. `sectionKey` restricted to `/^[a-z_]+$/`.
+- **Request size limits**: 1 MB body guard middleware active on mutating routes.
+- **Unhandled rejections**: All API routes wrap DO/MLS calls in `try/catch` and return structured errors.
+- **Authentication**: Auth middleware enforces Bearer token when `API_TOKEN` is configured.
+- **D1 fallback**: DB errors caught and return 503 with a retry-after implication.
+- **MLS timeout/retry**: `AbortSignal.timeout(15000)` on outbound fetches. 409/412 explicitly handled. Queue integration ready for deferred retries.
+- **Pagination**: `/admin/intakes` returns `{ data, nextCursor }` with configurable `limit`.
+- **RESO gaps fixed**: `PropertyType` mapping corrected, all document types included in `Media`, `SourceSystemName`/`Key` added, `DaysOnMarket`/`CumulativeDaysOnMarket` computed.
+- **Webhook verification**: HMAC-SHA256 signature check added to both webhook endpoints.
+
+---
+
 ## Executive Summary
 
 This audit found **24 issues** across 6 attack vectors. The most severe finding is that the `Approve` and `Block` admin features are **completely non-functional** due to a missing `role` field in command metadata. Additionally, intakes that reach `submitted` status are **permanently stuck** because there is no API route to advance them to `under_review`.

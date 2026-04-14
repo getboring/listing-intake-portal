@@ -20,11 +20,26 @@ export interface MLSConnector {
   deleteListing(mlsListingKey: string): Promise<{ success: boolean; errors?: string[] }>;
 }
 
+const zHttpsUrl = z.string().url().refine((u) => u.startsWith("https://"), {
+  message: "MLS endpoints must use HTTPS",
+});
+
+function validateMlsListingKey(key: string): string {
+  const safe = key.trim();
+  if (!/^[A-Za-z0-9\-_\.]+$/.test(safe)) {
+    throw new Error("Invalid MLS listing key format");
+  }
+  return safe;
+}
+
 export class RESOWebAPIAdapter implements MLSConnector {
   private accessToken?: string;
   private expiresAt = 0;
 
-  constructor(private config: MLSConnectionConfig) {}
+  constructor(private config: MLSConnectionConfig) {
+    zHttpsUrl.parse(config.baseUrl);
+    zHttpsUrl.parse(config.auth.tokenEndpoint);
+  }
 
   async authenticate(): Promise<{ accessToken: string; expiresAt: number }> {
     const params = new URLSearchParams();
@@ -43,7 +58,7 @@ export class RESOWebAPIAdapter implements MLSConnector {
     });
 
     if (!res.ok) {
-      throw new Error(`MLS auth failed: ${res.status} ${await res.text()}`);
+      throw new Error(`MLS auth failed: ${res.status}`);
     }
 
     const raw = await res.json();
@@ -95,6 +110,13 @@ export class RESOWebAPIAdapter implements MLSConnector {
       return { success: true, mlsListingKey };
     }
 
+    if (res.status === 409) {
+      return { success: false, errors: ["Conflict: duplicate listing detected"] };
+    }
+    if (res.status === 412) {
+      return { success: false, errors: ["Precondition failed: stale data. Please retry."] };
+    }
+
     const text = await res.text();
     return { success: false, errors: [`${res.status}: ${text}`] };
   }
@@ -104,7 +126,8 @@ export class RESOWebAPIAdapter implements MLSConnector {
     payload: Record<string, unknown>
   ): Promise<{ success: boolean; errors?: string[] }> {
     const token = await this.ensureAuth();
-    const url = `${this.config.baseUrl}/${this.config.resourceName}('${mlsListingKey}')`;
+    const safeKey = validateMlsListingKey(mlsListingKey);
+    const url = `${this.config.baseUrl}/${this.config.resourceName}('${encodeURIComponent(safeKey)}')`;
     const res = await fetch(url, {
       method: "PATCH",
       headers: this.headers(token),
@@ -115,6 +138,12 @@ export class RESOWebAPIAdapter implements MLSConnector {
     if (res.status === 200 || res.status === 204) {
       return { success: true };
     }
+    if (res.status === 409) {
+      return { success: false, errors: ["Conflict: unable to update listing"] };
+    }
+    if (res.status === 412) {
+      return { success: false, errors: ["Precondition failed: stale data. Please retry."] };
+    }
 
     const text = await res.text();
     return { success: false, errors: [`${res.status}: ${text}`] };
@@ -124,7 +153,8 @@ export class RESOWebAPIAdapter implements MLSConnector {
     mlsListingKey: string
   ): Promise<{ success: boolean; errors?: string[] }> {
     const token = await this.ensureAuth();
-    const url = `${this.config.baseUrl}/${this.config.resourceName}('${mlsListingKey}')`;
+    const safeKey = validateMlsListingKey(mlsListingKey);
+    const url = `${this.config.baseUrl}/${this.config.resourceName}('${encodeURIComponent(safeKey)}')`;
     const res = await fetch(url, {
       method: "DELETE",
       headers: this.headers(token),

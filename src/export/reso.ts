@@ -48,9 +48,13 @@ export interface RESOPropertyPayload {
   ModificationTimestamp?: string;
   OriginatingSystemName?: string;
   OriginatingSystemKey?: string;
+  SourceSystemName?: string;
+  SourceSystemKey?: string;
   ListAgentKey?: string;
   PublicRemarks?: string;
   PrivateRemarks?: string;
+  DaysOnMarket?: number;
+  CumulativeDaysOnMarket?: number;
   Media?: RESOMediaItem[];
   // RESO allows local extensions
   [key: string]: unknown;
@@ -122,6 +126,17 @@ export function buildRESOPropertyPayload(
   const listPriceDollars =
     typeof intake.listPrice === "number" ? intake.listPrice / 100 : undefined;
 
+  // Compute DOM/CDOM when listingContractDate is present
+  let daysOnMarket: number | undefined;
+  let cumulativeDaysOnMarket: number | undefined;
+  if (intake.listingContractDate) {
+    const start = new Date(intake.listingContractDate);
+    const now = new Date();
+    const diffMs = now.getTime() - start.getTime();
+    daysOnMarket = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+    cumulativeDaysOnMarket = daysOnMarket;
+  }
+
   const payload: RESOPropertyPayload = {
     "@reso.context": "urn:reso:metadata:2.0:resource:property",
     ListingKey: intake.id,
@@ -166,7 +181,11 @@ export function buildRESOPropertyPayload(
       : undefined,
     OriginatingSystemName: intake.originatingSystemName || "listing-intake-portal",
     OriginatingSystemKey: intake.originatingSystemKey || undefined,
+    SourceSystemName: intake.originatingSystemName || "listing-intake-portal",
+    SourceSystemKey: intake.originatingSystemKey || intake.id,
     ListAgentKey: agent?.id || intake.assignedAgentId || undefined,
+    DaysOnMarket: daysOnMarket,
+    CumulativeDaysOnMarket: cumulativeDaysOnMarket,
     Media: media.length > 0 ? media : undefined,
     ...opts?.localExtensions,
   };

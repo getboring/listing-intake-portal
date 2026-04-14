@@ -1,4 +1,4 @@
-import type { CommandContext, MessageChannel } from "./types.js";
+import type { CommandContext } from "./types.js";
 import type { DomainEvent } from "../events/types.js";
 
 export interface CommandResult<T = unknown> {

@@ -3,6 +3,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2024-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  "//": "NOTE: Never commit secrets here. Use: npx wrangler secret put <NAME>",
   "d1_databases": [
     {
       "binding": "DB",
