@@ -83,12 +83,13 @@ The full RESO Data Dictionary 2.0 contains **1,700+ fields**. Current implementa
 **Remediation:** Use `localExtensions` parameter in `buildRESOPropertyPayload()` to inject custom fields per-MLS.
 
 ### MLS Connector Enhancements
-- Retry/backoff logic is not yet implemented.
-- `409 Conflict` and `412 Precondition Failed` handling is generic (returns status + body as error string).
-- No queue-based async push fallback yet.
+- ✅ `409 Conflict` and `412 Precondition Failed` are explicitly handled with sanitized error responses.
+- ✅ 15-second timeouts (`AbortSignal.timeout`) are enforced on all outbound MLS calls.
+- ⏳ Retry/backoff logic is not yet implemented.
+- ⏳ Queue-based async push fallback is not yet implemented.
 
 ### Computed Fields
-- `DaysOnMarket` and `CumulativeDaysOnMarket` are not auto-computed from `listingContractDate` and `approvedAt`.
+- ✅ `DaysOnMarket` and `CumulativeDaysOnMarket` are computed from `listingContractDate` (or `approvedAt` as fallback) in `buildRESOPropertyPayload()`.
 
 ### Webhooks
 - `EntityEvent` push publisher (RCP-028) is not yet implemented.
