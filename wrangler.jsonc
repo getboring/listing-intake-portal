@@ -7,7 +7,7 @@
     {
       "binding": "DB",
       "database_name": "listing-intake-db",
-      "database_id": "<your-database-id>"
+      "database_id": "70f398b9-62f0-4d99-afc9-b7a2d6f607a0"
     }
   ],
   "durable_objects": {
