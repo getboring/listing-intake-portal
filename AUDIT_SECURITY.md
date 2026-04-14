@@ -17,7 +17,7 @@ All critical and high findings have been addressed. Key changes:
 - **MLS Connector**: HTTPS enforced on `baseUrl` and `tokenEndpoint`. `mlsListingKey` validated with regex and URL-encoded. 409/412 handling added.
 - **Error Handling**: API routes wrap DO and MLS calls in `try/catch` and return sanitized errors (502/503) without leaking internals.
 - **Pagination**: `/admin/intakes` supports `limit` + `cursor` (offset-based) pagination.
-- **Frontend Bounds**: `window.prompt` inputs trimmed and capped at 2000 characters.
+- **Frontend Bounds**: `window.prompt` eliminated in favor of controlled modal dialogs with validated inputs.
 
 ---
 
@@ -185,7 +185,7 @@ async createIntake(cmd: CreateIntakeCommand) {
 - **File:** `app/components/AdminDashboard.tsx` line 46
 - **Problem:** The block reason from `window.prompt` is sent to the API without client-side trimming or length checks.
 - **Impact:** Minimal due to React escaping and Zod validation on the backend, but a user could accidentally paste multi-kilobyte text.
-- **Fix:** Trim and enforce a max length before sending.
+- **Fix:** Replaced all `window.prompt` / `window.confirm` usage with controlled modal dialogs (`Dialog` component) that validate and trim inputs before sending.
 
 ---
 
